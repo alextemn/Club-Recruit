@@ -10,22 +10,60 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
+def _env_flag(name, default="false"):
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-zf$rq_+dhzx8-r(*n-666+ohp^^^qnu7l@xoms&wvj_a=8&(3f'
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-zf$rq_+dhzx8-r(*n-666+ohp^^^qnu7l@xoms&wvj_a=8&(3f",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_flag("DJANGO_DEBUG", "true")
 
-ALLOWED_HOSTS = []
+if not DEBUG and SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY before deploying with DJANGO_DEBUG=false.")
+
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS")
+if not ALLOWED_HOSTS:
+    if DEBUG:
+        ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
+    else:
+        ALLOWED_HOSTS = [".elasticbeanstalk.com"]
+
+# ALB health checks use the instance private IP as the Host header.
+if not DEBUG:
+    ALLOWED_HOSTS.extend(["localhost", "127.0.0.1"])
+    try:
+        import socket
+        ALLOWED_HOSTS.append(socket.gethostbyname(socket.gethostname()))
+    except OSError:
+        pass
+
+CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 
 # Application definition
@@ -37,10 +75,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'backend',
 ]
+
+AUTH_USER_MODEL = 'backend.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -74,10 +117,20 @@ WSGI_APPLICATION = 'club_recruit.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB') or 'club_recruit',
+        'USER': os.environ.get('POSTGRES_USER') or 'postgres',
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+        'HOST': os.environ.get('POSTGRES_HOST') or 'localhost',
+        'PORT': os.environ.get('POSTGRES_PORT') or '5432',
     }
 }
+
+if _env_flag("POSTGRES_SSL"):
+    DATABASES["default"]["OPTIONS"] = {
+        "sslmode": "verify-full",
+        "sslrootcert": str(BASE_DIR / "backend" / "global-bundle.pem"),
+    }
 
 
 # Password validation
@@ -115,6 +168,20 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": (
+            "whitenoise.storage.CompressedStaticFilesStorage"
+            if not DEBUG
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        ),
+    },
+}
 
 
 # Email

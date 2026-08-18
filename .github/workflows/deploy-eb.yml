@@ -1,0 +1,66 @@
+name: Deploy backend to Elastic Beanstalk
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-2
+      EB_APPLICATION: club-recruit
+      EB_ENVIRONMENT: club-recruit-dev
+      EB_BUCKET: elasticbeanstalk-us-east-2-070437938186
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::070437938186:role/GitHubActionsClubRecruitDeploy
+          aws-region: us-east-2
+
+      - name: Build source bundle
+        run: |
+          zip -r deploy.zip . \
+            -x '*.git*' \
+            -x '.github/*' \
+            -x '.github/*/*' \
+            -x 'venv/*' \
+            -x '.venv/*' \
+            -x 'env/*' \
+            -x '.env' \
+            -x '.env.*' \
+            -x '.cursor/*' \
+            -x '.cursor/*/*' \
+            -x '*__pycache__*' \
+            -x '*.pyc' \
+            -x 'staticfiles/*' \
+            -x 'media/*' \
+            -x '.elasticbeanstalk/app_versions/*' \
+            -x '.elasticbeanstalk/logs/*'
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          VERSION="gha-${GITHUB_SHA:0:12}-$(date -u +%Y%m%d%H%M%S)"
+          KEY="${EB_APPLICATION}/${VERSION}.zip"
+          aws s3 cp deploy.zip "s3://${EB_BUCKET}/${KEY}"
+          aws elasticbeanstalk create-application-version \
+            --application-name "$EB_APPLICATION" \
+            --version-label "$VERSION" \
+            --source-bundle "S3Bucket=${EB_BUCKET},S3Key=${KEY}" \
+            --description "GitHub ${GITHUB_SHA}"
+          aws elasticbeanstalk update-environment \
+            --environment-name "$EB_ENVIRONMENT" \
+            --version-label "$VERSION"
+          aws elasticbeanstalk wait environment-updated \
+            --environment-name "$EB_ENVIRONMENT"
+          aws elasticbeanstalk describe-environments \
+            --environment-names "$EB_ENVIRONMENT" \
+            --query 'Environments[0].{Status:Status,Health:Health,CNAME:CNAME,Version:VersionLabel}' \
+            --output table

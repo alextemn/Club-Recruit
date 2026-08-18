@@ -19,6 +19,7 @@ local_settings.py
 # Environment
 .env
 .env.*
+!.env.example
 
 # IDE
 .idea/
@@ -29,3 +30,10 @@ local_settings.py
 # OS
 .DS_Store
 Thumbs.db
+
+# Cursor
+.cursor/
+
+# Elastic Beanstalk
+.elasticbeanstalk/app_versions/
+.elasticbeanstalk/logs/
